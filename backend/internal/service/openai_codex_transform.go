@@ -306,12 +306,13 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 	// callers must also keep the guidance in input as developer (notably
 	// Responses JSON object mode), while Chat Completions compatibility can
 	// omit text-only messages after promoting them losslessly.
-	if extractSystemMessagesFromInput(reqBody, opts.OmitPromotedSystemMessagesFromInput) {
+	prefixInstructions := openai.GPT62ModelID(normalizedModel) != ""
+	if !prefixInstructions && extractSystemMessagesFromInput(reqBody, opts.OmitPromotedSystemMessagesFromInput) {
 		result.Modified = true
 	}
 
 	// instructions 处理逻辑：根据是否是 Codex CLI 分别调用不同方法
-	if !opts.SkipDefaultInstructions && applyInstructions(reqBody, opts.IsCodexCLI) {
+	if !prefixInstructions && !opts.SkipDefaultInstructions && applyInstructions(reqBody, opts.IsCodexCLI) {
 		result.Modified = true
 	}
 	if isCodexSparkModel(normalizedModel) && applyCodexSparkImageUnsupportedInstructions(reqBody) {
@@ -354,6 +355,10 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 		} else {
 			reqBody["input"] = []any{}
 		}
+		result.Modified = true
+	}
+
+	if prefixInstructions && normalizeGPT62CodexInstructions(reqBody, normalizedModel, !opts.SkipDefaultInstructions) {
 		result.Modified = true
 	}
 
@@ -1373,6 +1378,36 @@ func extractSystemMessagesFromInput(reqBody map[string]any, omitPromoted bool) b
 	} else {
 		reqBody["instructions"] = extracted
 	}
+	return true
+}
+
+func normalizeGPT62CodexInstructions(reqBody map[string]any, model string, supplyDefault bool) bool {
+	input, _ := reqBody["input"].([]any)
+	modified := false
+	for _, raw := range input {
+		item, _ := raw.(map[string]any)
+		if item["role"] == "system" {
+			item["role"] = "developer"
+			modified = true
+		}
+	}
+	if !isInstructionsEmpty(reqBody) {
+		return modified
+	}
+	if reqBody["instructions"] != "" {
+		reqBody["instructions"] = ""
+		modified = true
+	}
+	if !supplyDefault || len(input) == 0 || hasNonEmptyString(reqBody["previous_response_id"]) || reqBody["conversation"] != nil {
+		return modified
+	}
+	first, _ := input[0].(map[string]any)
+	if first["role"] == "developer" && (first["type"] == nil || first["type"] == "message") {
+		return modified
+	}
+	reqBody["input"] = append([]any{map[string]any{
+		"type": "message", "role": "developer", "content": defaultCodexSynthInstructions(model),
+	}}, input...)
 	return true
 }
 
