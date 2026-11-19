@@ -330,6 +330,8 @@ gateway:
   # 已经被归一化为 Codex `instructions` 之后。
   #
   # The template can reference:
+  # GPT-6.2 Sol/Astra render this template in the leading developer message in input.
+  # GPT-6.2 Sol/Astra 将模板渲染在 input 开头的 developer 消息中，以便复用前缀。
   # 模板可引用：
   # - {{ .ExistingInstructions }} : converted client instructions/system
   # - {{ .OriginalModel }}        : original requested model

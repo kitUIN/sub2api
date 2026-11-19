@@ -243,16 +243,11 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		if codexResult.NormalizedModel != "" {
 			templateUpstreamModel = codexResult.NormalizedModel
 		}
-		existingInstructions, _ := reqBody["instructions"].(string)
-		if strings.TrimSpace(existingInstructions) == "" {
-			existingInstructions = extractPromptLikeInstructionsFromInput(reqBody)
-		}
 		if _, err := applyForcedCodexInstructionsTemplate(reqBody, forcedTemplateText, forcedCodexInstructionsTemplateData{
-			ExistingInstructions: strings.TrimSpace(existingInstructions),
-			OriginalModel:        originalModel,
-			NormalizedModel:      normalizedModel,
-			BillingModel:         billingModel,
-			UpstreamModel:        templateUpstreamModel,
+			OriginalModel:   originalModel,
+			NormalizedModel: normalizedModel,
+			BillingModel:    billingModel,
+			UpstreamModel:   templateUpstreamModel,
 		}); err != nil {
 			return nil, err
 		}

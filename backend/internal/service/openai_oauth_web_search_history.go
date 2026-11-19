@@ -3,8 +3,10 @@ package service
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -117,6 +119,9 @@ func ensureOpenAIOAuthWebSearchToolForHistory(reqBody map[string]any, responsesL
 	callerDeclaredTools = callerDeclaredTools || len(tools) > 0
 
 	switch {
+	case openai.GPT62ModelID(firstNonEmptyString(reqBody["model"])) != "":
+		at := slices.Index(itemTypes, openAIWebSearchCallItemType)
+		reqBody["input"] = slices.Insert(input, at, any(openAIWebSearchHistoryDeclaration()))
 	case !responsesLite:
 		reqBody["tools"] = append(tools, cloneOpenAIWebSearchHistoryTool())
 	case additionalToolsIndex >= 0:
@@ -126,11 +131,7 @@ func ensureOpenAIOAuthWebSearchToolForHistory(reqBody map[string]any, responsesL
 		item["tools"] = append(existing, cloneOpenAIWebSearchHistoryTool())
 	default:
 		at := openAIAdditionalToolsInsertIndex(itemTypes)
-		additional := map[string]any{
-			"type":  openAIAdditionalToolsItemType,
-			"role":  openAIAdditionalToolsDefaultRole,
-			"tools": []any{cloneOpenAIWebSearchHistoryTool()},
-		}
+		additional := openAIWebSearchHistoryDeclaration()
 		next := make([]any, 0, len(input)+1)
 		next = append(next, input[:at]...)
 		next = append(next, additional)
@@ -193,6 +194,8 @@ func ensureOpenAIOAuthWebSearchToolForHistoryBody(body []byte, responsesLite boo
 		err  error
 	)
 	switch {
+	case openai.GPT62ModelID(gjson.GetBytes(body, "model").String()) != "":
+		next, err = insertOpenAIAdditionalToolsItemRaw(body, items, slices.Index(itemTypes, openAIWebSearchCallItemType))
 	case !responsesLite && topLevelTools:
 		next, err = sjson.SetBytes(body, "tools.-1", cloneOpenAIWebSearchHistoryTool())
 	case !responsesLite:
@@ -219,12 +222,16 @@ func ensureOpenAIOAuthWebSearchToolForHistoryBody(body []byte, responsesLite boo
 	return next, true, nil
 }
 
-func insertOpenAIAdditionalToolsItemRaw(body []byte, items []gjson.Result, at int) ([]byte, error) {
-	additional, err := marshalOpenAIUpstreamJSON(map[string]any{
+func openAIWebSearchHistoryDeclaration() map[string]any {
+	return map[string]any{
 		"type":  openAIAdditionalToolsItemType,
 		"role":  openAIAdditionalToolsDefaultRole,
 		"tools": []any{cloneOpenAIWebSearchHistoryTool()},
-	})
+	}
+}
+
+func insertOpenAIAdditionalToolsItemRaw(body []byte, items []gjson.Result, at int) ([]byte, error) {
+	additional, err := marshalOpenAIUpstreamJSON(openAIWebSearchHistoryDeclaration())
 	if err != nil {
 		return nil, err
 	}

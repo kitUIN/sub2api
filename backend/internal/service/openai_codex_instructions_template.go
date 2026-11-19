@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"text/template"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
 type forcedCodexInstructionsTemplateData struct {
@@ -20,12 +22,43 @@ func applyForcedCodexInstructionsTemplate(
 	templateText string,
 	data forcedCodexInstructionsTemplateData,
 ) (bool, error) {
+	if templateText == "" {
+		return false, nil
+	}
+	prefix := openai.GPT62ModelID(data.UpstreamModel) != ""
+	input, _ := reqBody["input"].([]any)
+	var base map[string]any
+	if prefix {
+		if len(input) > 0 {
+			first, _ := input[0].(map[string]any)
+			if first["role"] == "developer" && first["type"] == "message" {
+				if _, lossless := extractLosslessTextFromContent(first["content"]); lossless {
+					base = first
+					data.ExistingInstructions = strings.TrimSpace(extractTextFromContent(first["content"]))
+				}
+			}
+		}
+	} else {
+		existing, _ := reqBody["instructions"].(string)
+		data.ExistingInstructions = strings.TrimSpace(existing)
+		if data.ExistingInstructions == "" {
+			data.ExistingInstructions = extractPromptLikeInstructionsFromInput(reqBody)
+		}
+	}
 	rendered, err := renderForcedCodexInstructionsTemplate(templateText, data)
 	if err != nil {
 		return false, err
 	}
 	if rendered == "" {
 		return false, nil
+	}
+	if prefix {
+		if base != nil {
+			base["content"] = rendered
+		} else {
+			reqBody["input"] = append([]any{map[string]any{"type": "message", "role": "developer", "content": rendered}}, input...)
+		}
+		return true, nil
 	}
 
 	existing, _ := reqBody["instructions"].(string)

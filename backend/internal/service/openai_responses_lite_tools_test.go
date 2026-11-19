@@ -40,7 +40,7 @@ func TestNormalizeOpenAIResponsesLiteTools_MovesNamespacesAndKeepsSupportedTools
 		"tool_choice": map[string]any{"type": "namespace", "name": "collaboration"},
 	}
 
-	changed, err := normalizeOpenAIResponsesLiteTools(reqBody)
+	changed, err := normalizeOpenAIResponsesLiteTools(reqBody, nil)
 
 	require.NoError(t, err)
 	require.True(t, changed)
@@ -66,7 +66,7 @@ func TestNormalizeOpenAIResponsesLiteTools_PreservesDeferredFlagsWithToolSearch(
 		},
 	}
 
-	_, err := normalizeOpenAIResponsesLiteTools(reqBody)
+	_, err := normalizeOpenAIResponsesLiteTools(reqBody, nil)
 	require.NoError(t, err)
 	tools := reqBody["tools"].([]any)
 	require.Equal(t, "tool_search", tools[0].(map[string]any)["type"])
@@ -90,7 +90,7 @@ func TestNormalizeOpenAIResponsesLiteTools_RejectsConflictingAdditionalTool(t *t
 		}},
 	}
 
-	changed, err := normalizeOpenAIResponsesLiteTools(reqBody)
+	changed, err := normalizeOpenAIResponsesLiteTools(reqBody, nil)
 
 	require.ErrorContains(t, err, `conflicts with migrated tool type "namespace" name "collaboration"`)
 	require.False(t, changed)
@@ -117,7 +117,7 @@ func TestNormalizeOpenAIResponsesLiteTools_DeduplicatesAcrossAdditionalToolItems
 		},
 	}
 
-	changed, err := normalizeOpenAIResponsesLiteTools(reqBody)
+	changed, err := normalizeOpenAIResponsesLiteTools(reqBody, nil)
 
 	require.NoError(t, err)
 	require.True(t, changed)
@@ -136,7 +136,7 @@ func TestNormalizeOpenAIResponsesLiteTools_ConvertsStringInput(t *testing.T) {
 		}},
 	}
 
-	changed, err := normalizeOpenAIResponsesLiteTools(reqBody)
+	changed, err := normalizeOpenAIResponsesLiteTools(reqBody, nil)
 
 	require.NoError(t, err)
 	require.True(t, changed)
@@ -159,7 +159,7 @@ func TestNormalizeOpenAIResponsesLiteTools_KeepsSupportedTopLevelTools(t *testin
 		},
 	}
 
-	changed, err := normalizeOpenAIResponsesLiteTools(reqBody)
+	changed, err := normalizeOpenAIResponsesLiteTools(reqBody, nil)
 
 	require.NoError(t, err)
 	require.True(t, changed)
@@ -192,7 +192,7 @@ func TestNormalizeOpenAIResponsesLiteTools_ForcesParallelToolCallsFalse(t *testi
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			changed, err := normalizeOpenAIResponsesLiteTools(tt.body)
+			changed, err := normalizeOpenAIResponsesLiteTools(tt.body, nil)
 
 			require.NoError(t, err)
 			require.True(t, changed)
@@ -220,7 +220,7 @@ func TestNormalizeOpenAIResponsesLiteTools_PinsParallelToolCallsWithoutTools(t *
 				reqBody["parallel_tool_calls"] = tt.parallel
 			}
 
-			changed, err := normalizeOpenAIResponsesLiteTools(reqBody)
+			changed, err := normalizeOpenAIResponsesLiteTools(reqBody, nil)
 
 			require.NoError(t, err)
 			require.Equal(t, tt.wantChanged, changed)
@@ -237,7 +237,7 @@ func TestNormalizeOpenAIResponsesLiteTools_RejectsNonBooleanParallelToolCalls(t 
 			"parallel_tool_calls": value,
 		}
 
-		changed, err := normalizeOpenAIResponsesLiteTools(reqBody)
+		changed, err := normalizeOpenAIResponsesLiteTools(reqBody, nil)
 
 		require.ErrorContains(t, err, "parallel_tool_calls to be a boolean")
 		require.False(t, changed)
@@ -245,7 +245,7 @@ func TestNormalizeOpenAIResponsesLiteTools_RejectsNonBooleanParallelToolCalls(t 
 	}
 
 	reqBody := map[string]any{"parallel_tool_calls": []any{}}
-	changed, err := normalizeOpenAIResponsesLiteTools(reqBody)
+	changed, err := normalizeOpenAIResponsesLiteTools(reqBody, nil)
 	require.ErrorContains(t, err, "parallel_tool_calls to be a boolean")
 	require.False(t, changed)
 }
@@ -257,13 +257,13 @@ func TestNormalizeOpenAIResponsesLiteTools_ParallelToolCallsIsIdempotent(t *test
 		"parallel_tool_calls": true,
 	}
 
-	changed, err := normalizeOpenAIResponsesLiteTools(reqBody)
+	changed, err := normalizeOpenAIResponsesLiteTools(reqBody, nil)
 
 	require.NoError(t, err)
 	require.True(t, changed)
 	require.Equal(t, false, reqBody["parallel_tool_calls"])
 
-	changed, err = normalizeOpenAIResponsesLiteTools(reqBody)
+	changed, err = normalizeOpenAIResponsesLiteTools(reqBody, nil)
 	require.NoError(t, err)
 	require.False(t, changed)
 	require.Equal(t, false, reqBody["parallel_tool_calls"])
@@ -286,7 +286,7 @@ func TestNormalizeOpenAIResponsesLiteTools_EnsuresReasoningContext(t *testing.T)
 				reqBody["reasoning"] = tt.reasoning
 			}
 
-			changed, err := normalizeOpenAIResponsesLiteTools(reqBody)
+			changed, err := normalizeOpenAIResponsesLiteTools(reqBody, nil)
 
 			require.NoError(t, err)
 			require.True(t, changed)
@@ -302,7 +302,7 @@ func TestNormalizeOpenAIResponsesLiteTools_EnsuresReasoningContext(t *testing.T)
 func TestNormalizeOpenAIResponsesLiteTools_RejectsNonObjectReasoning(t *testing.T) {
 	reqBody := map[string]any{"reasoning": "high"}
 
-	changed, err := normalizeOpenAIResponsesLiteTools(reqBody)
+	changed, err := normalizeOpenAIResponsesLiteTools(reqBody, nil)
 
 	require.ErrorContains(t, err, "reasoning to be an object")
 	require.False(t, changed)
@@ -322,7 +322,7 @@ func TestNormalizeOpenAIResponsesLiteTools_RejectsUnsupportedTools(t *testing.T)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			reqBody := map[string]any{"tools": []any{tt.tool}}
-			changed, err := normalizeOpenAIResponsesLiteTools(reqBody)
+			changed, err := normalizeOpenAIResponsesLiteTools(reqBody, nil)
 			require.ErrorContains(t, err, tt.want)
 			require.False(t, changed)
 			require.Len(t, reqBody["tools"], 1, "validation errors must not partially mutate tools")
@@ -340,7 +340,7 @@ func TestNormalizeOpenAIResponsesLiteToolsPayload_PreservesResponseCreateShape(t
 		"tool_choice":{"type":"namespace","name":"collaboration"}
 	}`)
 
-	updated, changed, err := normalizeOpenAIResponsesLiteToolsPayload(body)
+	updated, changed, err := normalizeOpenAIResponsesLiteToolsPayload(body, nil)
 
 	require.NoError(t, err)
 	require.True(t, changed)
@@ -363,7 +363,7 @@ func TestNormalizeOpenAIResponsesLitePayloads_PreserveLargeSequence(t *testing.T
 		name      string
 		normalize func([]byte) ([]byte, bool, error)
 	}{
-		{name: "OAuth-like tools normalization", normalize: normalizeOpenAIResponsesLiteToolsPayload},
+		{name: "OAuth-like tools normalization", normalize: func(body []byte) ([]byte, bool, error) { return normalizeOpenAIResponsesLiteToolsPayload(body, nil) }},
 		{name: "API key parallel normalization", normalize: normalizeOpenAIResponsesLiteParallelToolCallsPayload},
 	}
 

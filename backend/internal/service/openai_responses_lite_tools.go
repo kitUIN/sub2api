@@ -3,7 +3,10 @@ package service
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
 type openAIResponsesLiteValidationError struct {
@@ -22,7 +25,7 @@ func newOpenAIResponsesLiteValidationError(param, format string, args ...any) er
 // use the input.additional_tools carrier. Other top-level tools must belong to
 // the small set accepted by the Lite endpoint; rejecting unsupported hosted
 // tools is intentional because silently dropping them would change behavior.
-func normalizeOpenAIResponsesLiteTools(reqBody map[string]any) (bool, error) {
+func normalizeOpenAIResponsesLiteTools(reqBody map[string]any, account *Account) (bool, error) {
 	if reqBody == nil {
 		return false, nil
 	}
@@ -83,7 +86,11 @@ func normalizeOpenAIResponsesLiteTools(reqBody map[string]any) (bool, error) {
 		return ensureOpenAIResponsesLiteParallelToolCalls(reqBody, changed)
 	}
 
-	input, err := appendOpenAIResponsesLiteAdditionalTools(reqBody["input"], namespaceTools)
+	model, _ := reqBody["model"].(string)
+	if account != nil {
+		model = resolveOpenAIAccountUpstreamModelForRequest(account, model, false)
+	}
+	input, err := appendOpenAIResponsesLiteAdditionalTools(reqBody["input"], namespaceTools, openai.GPT62ModelID(model) != "")
 	if err != nil {
 		return false, err
 	}
@@ -130,7 +137,7 @@ func ensureOpenAIResponsesLiteReasoningContext(reqBody map[string]any) (bool, er
 	return true, nil
 }
 
-func appendOpenAIResponsesLiteAdditionalTools(input any, namespaceTools []any) ([]any, error) {
+func appendOpenAIResponsesLiteAdditionalTools(input any, namespaceTools []any, preserveHistory bool) ([]any, error) {
 	var items []any
 	switch typed := input.(type) {
 	case nil:
@@ -176,10 +183,37 @@ func appendOpenAIResponsesLiteAdditionalTools(input any, namespaceTools []any) (
 		return nil, err
 	}
 	newTools := merged[len(allAdditionalTools):]
-	if target != nil {
-		if len(newTools) > 0 {
-			target["tools"] = append(append([]any(nil), targetTools...), newTools...)
+	if len(newTools) == 0 {
+		return items, nil
+	}
+	if preserveHistory {
+		at := len(items)
+		if !codexToolsContainType(allAdditionalTools, "namespace") {
+			for index, raw := range items {
+				item, _ := raw.(map[string]any)
+				kind, _ := item["type"].(string)
+				if item["role"] == "assistant" || kind == "reasoning" || strings.HasSuffix(kind, "_call") || isCodexToolCallOutputItemType(kind) {
+					at = index
+					break
+				}
+			}
 		}
+		if at == len(items) && at > 0 {
+			last, _ := items[at-1].(map[string]any)
+			if last["type"] == openAICompactionTriggerItemType {
+				at--
+			}
+		}
+		declarations := make([]any, 0, len(newTools))
+		for _, tool := range newTools {
+			declarations = append(declarations, map[string]any{
+				"type": openAIAdditionalToolsItemType, "role": openAIAdditionalToolsDefaultRole, "tools": []any{tool},
+			})
+		}
+		return slices.Insert(items, at, declarations...), nil
+	}
+	if target != nil {
+		target["tools"] = append(append([]any(nil), targetTools...), newTools...)
 		return items, nil
 	}
 
@@ -236,12 +270,12 @@ func openAIResponsesLiteToolIdentityForError(rawTool any) string {
 	return fmt.Sprintf("tool type %q name %q", strings.TrimSpace(firstNonEmptyString(tool["type"])), strings.TrimSpace(firstNonEmptyString(tool["name"])))
 }
 
-func normalizeOpenAIResponsesLiteToolsPayload(body []byte) ([]byte, bool, error) {
+func normalizeOpenAIResponsesLiteToolsPayload(body []byte, account *Account) ([]byte, bool, error) {
 	var requestBody map[string]any
 	if err := decodeOpenAIJSONUseNumber(body, &requestBody); err != nil {
 		return body, false, fmt.Errorf("decode responses Lite request body: %w", err)
 	}
-	changed, err := normalizeOpenAIResponsesLiteTools(requestBody)
+	changed, err := normalizeOpenAIResponsesLiteTools(requestBody, account)
 	if err != nil || !changed {
 		return body, false, err
 	}
@@ -273,7 +307,7 @@ func normalizeOpenAIResponsesLitePayloadForAccount(body []byte, account *Account
 		return body, false, nil
 	}
 	if account.IsOpenAIOAuthLike() {
-		return normalizeOpenAIResponsesLiteToolsPayload(body)
+		return normalizeOpenAIResponsesLiteToolsPayload(body, account)
 	}
 	return normalizeOpenAIResponsesLiteParallelToolCallsPayload(body)
 }
