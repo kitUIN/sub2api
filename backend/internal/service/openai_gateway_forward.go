@@ -544,6 +544,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			ensureCodexOAuthInstructionsField(decoded)
 			markDecodedModified()
 		} else {
+			if !isCompactRequest && wsDecision.Transport == OpenAIUpstreamTransportHTTPSSE &&
+				prefixOpenCodeGPT62Instructions(decoded, upstreamModel, c.GetHeader("User-Agent")) {
+				markDecodedModified()
+			}
 			codexResult = applyCodexOAuthTransformWithOptions(decoded, codexOAuthTransformOptions{
 				IsCodexCLI:                          isCodexCLI,
 				IsCompact:                           isCompactRequest,

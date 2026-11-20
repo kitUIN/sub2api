@@ -1381,6 +1381,43 @@ func extractSystemMessagesFromInput(reqBody map[string]any, omitPromoted bool) b
 	return true
 }
 
+// OpenCode sends its project instructions at the top level on every stateless replay.
+// Move them into the reusable prefix only when the client supplies the whole
+// conversation and there are no other instructions whose precedence could change.
+func prefixOpenCodeGPT62Instructions(reqBody map[string]any, model, userAgent string) bool {
+	if !strings.HasPrefix(strings.ToLower(userAgent), "opencode/") || openai.GPT62ModelID(model) == "" {
+		return false
+	}
+	if reqBody["store"] != false || reqBody["previous_response_id"] != nil || reqBody["conversation"] != nil ||
+		reqBody["prompt"] != nil || !hasNonEmptyString(reqBody["prompt_cache_key"]) {
+		return false
+	}
+	instructions, _ := reqBody["instructions"].(string)
+	input, _ := reqBody["input"].([]any)
+	if strings.TrimSpace(instructions) == "" || len(input) == 0 {
+		return false
+	}
+	first, _ := input[0].(map[string]any)
+	if first["role"] != "user" {
+		return false
+	}
+	for _, raw := range input {
+		item, _ := raw.(map[string]any)
+		switch item["type"] {
+		case nil, "message":
+			if item["role"] != "user" && item["role"] != "assistant" {
+				return false
+			}
+		case "reasoning", "function_call", "function_call_output":
+		default:
+			return false
+		}
+	}
+	reqBody["input"] = append([]any{map[string]any{"type": "message", "role": "developer", "content": instructions}}, input...)
+	reqBody["instructions"] = ""
+	return true
+}
+
 func normalizeGPT62CodexInstructions(reqBody map[string]any, model string, supplyDefault bool) bool {
 	input, _ := reqBody["input"].([]any)
 	modified := false

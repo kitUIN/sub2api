@@ -1,12 +1,78 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+func TestOpenCodeGPT62ReplayInstructions(t *testing.T) {
+	const instructions = " Project rules\nsecond line "
+	capture := func(t *testing.T, model, history string) gjson.Result {
+		t.Helper()
+		upstream := instructionsEchoUpstream(`""`)
+		svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		c.Request.Header.Set("User-Agent", "opencode/latest ai-sdk")
+		SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+		body := []byte(`{"model":"` + model + `","instructions":" Project rules\nsecond line ","store":false,"stream":true,"prompt_cache_key":"session","input":[` + history + `]}`)
+		_, err := svc.Forward(context.Background(), c, instructionsEchoOAuthAccount(false), body)
+		require.NoError(t, err)
+		require.Equal(t, instructions, sseResponseInstructions(t, rec.Body.String(), "response.completed").String())
+		return gjson.ParseBytes(upstream.lastBody)
+	}
+	const user = `{"role":"user","content":"one"}`
+	for _, model := range []string{"gpt-6.2-sol", "gpt-6.2-astra"} {
+		t.Run(model, func(t *testing.T) {
+			first := capture(t, model, user)
+			next := capture(t, model, user+`,{"role":"assistant","content":"answer"},{"role":"user","content":"two"}`)
+			require.Equal(t, model, first.Get("model").String())
+			require.True(t, first.Get("instructions").Exists())
+			require.Equal(t, "", first.Get("instructions").String())
+			require.Equal(t, "developer", first.Get("input.0.role").String())
+			require.Equal(t, instructions, first.Get("input.0.content").String())
+			require.Equal(t, "user", first.Get("input.1.role").String())
+			require.Len(t, first.Get("input").Array(), 2)
+			require.Len(t, next.Get("input").Array(), 4)
+			require.Equal(t, first.Get("input").Value(), next.Get("input").Value().([]any)[:2])
+			require.Equal(t, first.Get("prompt_cache_key").String(), next.Get("prompt_cache_key").String())
+		})
+	}
+}
+
+func TestOpenCodeGPT62ReplayKeepsTurnInstructions(t *testing.T) {
+	for _, tc := range []struct {
+		name, model, userAgent string
+		fields                 map[string]any
+	}{
+		{"other client", "gpt-6.2-sol", "openai-python", nil},
+		{"other model", "gpt-6.1-sol", "opencode/latest", nil},
+		{"chained", "gpt-6.2-sol", "opencode/latest", map[string]any{"previous_response_id": "resp_1"}},
+		{"conversation", "gpt-6.2-sol", "opencode/latest", map[string]any{"conversation": "conv_1"}},
+		{"stored", "gpt-6.2-sol", "opencode/latest", map[string]any{"store": true}},
+		{"no cache key", "gpt-6.2-sol", "opencode/latest", map[string]any{"prompt_cache_key": ""}},
+		{"mixed guidance", "gpt-6.2-sol", "opencode/latest", map[string]any{"input": []any{map[string]any{"role": "user"}, map[string]any{"role": "developer"}}}},
+		{"opaque history", "gpt-6.2-sol", "opencode/latest", map[string]any{"input": []any{map[string]any{"role": "user"}, map[string]any{"type": "item_reference", "id": "msg_1"}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := map[string]any{"instructions": "this turn", "prompt_cache_key": "session", "store": false, "input": []any{map[string]any{"role": "user"}}}
+			for k, v := range tc.fields {
+				body[k] = v
+			}
+			require.False(t, prefixOpenCodeGPT62Instructions(body, tc.model, tc.userAgent))
+			require.Equal(t, "this turn", body["instructions"])
+		})
+	}
+}
 
 func TestGPT62OAuthInstructionsPrefixAcrossTurns(t *testing.T) {
 	for _, model := range []string{"gpt-6.2-sol", "gpt-6.2-astra"} {
